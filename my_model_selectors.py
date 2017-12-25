@@ -44,7 +44,7 @@ class ModelSelector(object):
         except:
             if self.verbose:
                 print("failure on {} with {} states".format(self.this_word, num_states))
-            return None
+            return None 
 
 
 class SelectorConstant(ModelSelector):
@@ -77,7 +77,30 @@ class SelectorBIC(ModelSelector):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
         # TODO implement model selection based on BIC scores
-        raise NotImplementedError
+        bestBIC, bestComponent = float('inf'), self.n_constant
+
+        for n_component in range(self.min_n_components, self.max_n_components + 1):
+            bic = self.bic_model(n_component)
+            if bic < bestBIC:
+                bestBIC = bic
+                bestComponent = n_component
+
+        return self.base_model(bestComponent)
+
+    def bic_model(self, n_component):
+        try:
+            model = GaussianHMM(n_components=n_component, n_iter=1000).fit(self.X, self.lengths)
+            logL = model.score(self.X, self.lengths)
+            n_parameters = n_component * (n_component + 2 * len(self.X[0])) - 1
+            bic = n_parameters * math.log(len(self.X)) - 2 * logL
+            if self.verbose:
+                print("model created for {} with {} states".format(self.this_word, n_component))
+        except:
+            if self.verbose:
+                print("failure on {} with {} states".format(self.this_word, n_component))
+            bic = float('inf')
+
+        return bic
 
 
 class SelectorDIC(ModelSelector):
@@ -94,8 +117,49 @@ class SelectorDIC(ModelSelector):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
         # TODO implement model selection based on DIC scores
-        raise NotImplementedError
+        bestDIC, bestComponent = float('-inf'), self.n_constant
 
+        for n_component in range(self.min_n_components, self.max_n_components + 1):
+            dic = self.dic_model(n_component)
+            if dic > bestDIC:
+                bestDIC = dic
+                bestComponent = n_component
+
+        return self.base_model(bestComponent)
+
+    def dic_model(self,n_component):
+        """
+        :param n_component:
+        :return: dic score of the model
+        """
+        try:
+            model = GaussianHMM(n_components=n_component, n_iter=1000).fit(self.X, self.lengths)
+            logL = model.score(self.X, self.lengths)
+            if self.verbose:
+                print("model created for {} with {} states".format(self.this_word, n_component))
+            avg_score = self.avg_score_for_other_words(model)
+            dic = logL - avg_score
+        except:
+            if self.verbose:
+                print("failure on {} with {} states".format(self.this_word, n_component))
+            dic = float('-inf')
+
+        return dic
+
+    def avg_score_for_other_words(self,model):
+        """
+        :param model:
+        :return: avg score for other words
+        """
+
+        logL_others = []
+
+        for word in self.hwords:
+            if word is not self.this_word:
+                X_other, length_other = self.hwords[word]
+                logL_others.append(model.score(X_other, length_other))
+
+        return np.mean(logL_others)
 
 class SelectorCV(ModelSelector):
     ''' select best model based on average log Likelihood of cross-validation folds
@@ -106,5 +170,35 @@ class SelectorCV(ModelSelector):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
         # TODO implement model selection using CV
-        
-        raise NotImplementedError
+        maxLogL, bestComponent = float('-inf'), self.n_constant
+        n_splits = min(3, len(self.sequences))
+
+        for n_component in range(self.min_n_components, self.max_n_components + 1):
+            avg_logL = self.cross_validation(n_component, n_splits)
+            if avg_logL > maxLogL:
+                bestComponent = n_component
+                maxLogL = avg_logL
+
+        return self.base_model(bestComponent)
+
+    def cross_validation(self, n_component, n_splits):
+        temp_logL, kfold = [], KFold(n_splits=n_splits)
+        try:
+            for trainIndexes, testIndexes in kfold.split(self.sequences):
+                temp_logL.append(self.cv_model(trainIndexes, testIndexes, n_component))
+            if self.verbose:
+                print("model created for {} with {} states".format(self.this_word, n_component))
+        except:
+            if self.verbose:
+                print("failure on {} with {} states".format(self.this_word, n_component))
+            return float('-inf')
+
+        return np.mean(temp_logL)
+
+    def cv_model(self, trainIndexes, testIndexes, n_component):
+        X_train, lengths_train = combine_sequences(trainIndexes, self.sequences)
+        X_test, lengths_test = combine_sequences(testIndexes, self.sequences)
+        model = GaussianHMM(n_components=n_component, n_iter=1000).fit(X_train, lengths_train)
+        logL = model.score(X_test, lengths_test)
+
+        return logL
