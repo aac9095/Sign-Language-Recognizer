@@ -44,7 +44,7 @@ class ModelSelector(object):
         except:
             if self.verbose:
                 print("failure on {} with {} states".format(self.this_word, num_states))
-            return None 
+            return None
 
 
 class SelectorConstant(ModelSelector):
@@ -172,6 +172,9 @@ class SelectorCV(ModelSelector):
         # TODO implement model selection using CV
         maxLogL, bestComponent = float('-inf'), self.n_constant
         n_splits = min(3, len(self.sequences))
+
+        if n_splits < 2:
+            return self.base_model(self.n_constant)
 
         for n_component in range(self.min_n_components, self.max_n_components + 1):
             avg_logL = self.cross_validation(n_component, n_splits)
